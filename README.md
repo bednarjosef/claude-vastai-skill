@@ -16,7 +16,7 @@ balance   →   search   →   up (+deadline)   →   watch / run / put / pull  
 ## Install
 
 ```bash
-git clone <this-repo> claude-vastai-skill
+git clone https://github.com/bednarjosef/claude-vastai-skill.git
 cd claude-vastai-skill
 ./install.sh
 ```
