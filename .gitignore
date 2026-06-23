@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local tracking state lives in ~/.vast-claude by default; never commit a copy
+.vast-claude/
+state.json
+*.local.json
