@@ -137,3 +137,7 @@ activated torch version.
 This is general GPU-box plumbing. The autonomous multi-GPU *research swarm*
 (parallel experiments, rounds, leaderboards) is a separate project. This skill is
 the reusable control-plane layer underneath that kind of workflow.
+
+## License
+
+[MIT](LICENSE) — free to use, modify, and distribute.
