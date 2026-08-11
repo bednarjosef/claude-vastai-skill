@@ -1,0 +1,82 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 640px; }
+  body {
+    background: #0b0e13;
+    font-family: Inter, system-ui, sans-serif;
+    color: #e5e7eb;
+    padding: 62px 72px;
+    display: flex; flex-direction: column;
+    position: relative; overflow: hidden;
+  }
+  body::after {
+    content: ""; position: absolute; right: -200px; top: -220px;
+    width: 760px; height: 760px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(52,211,153,.15), rgba(52,211,153,0) 68%);
+  }
+  header { display: flex; align-items: center; gap: 18px; position: relative; z-index: 1; }
+  .mark { font-size: 29px; font-weight: 600; letter-spacing: -.035em; color: #fff; }
+  .mark span { color: #34d399; }
+  .rule { flex: 1; height: 1px; background: #1f2937; }
+  .kicker { font-size: 18px; color: #6b7280;
+            font-family: "Ubuntu Sans Mono", "DejaVu Sans Mono", monospace; }
+
+  main { flex: 1; display: flex; gap: 52px; align-items: center; position: relative; z-index: 1; }
+  .left { width: 470px; flex: none; }
+  h1 { font-size: 62px; font-weight: 600; line-height: 1.1; letter-spacing: -.042em;
+       color: #fff; }
+  h1 em { font-style: normal; color: #34d399; }
+  .sub { font-size: 23px; color: #9ca3af; line-height: 1.5; margin-top: 22px;
+         letter-spacing: -.008em; }
+  .repo { margin-top: 30px; font-size: 17px; color: #4b5563;
+          font-family: "Ubuntu Sans Mono", "DejaVu Sans Mono", monospace; }
+
+  .term {
+    flex: 1; background: #111722; border: 1px solid #1f2937; border-radius: 14px;
+    overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.55);
+  }
+  .bar { height: 40px; border-bottom: 1px solid #1f2937; display: flex; align-items: center;
+         gap: 8px; padding: 0 15px; background: #0f1419; }
+  .bar i { width: 10px; height: 10px; border-radius: 50%; background: #26303f; }
+  .bar span { margin-left: 10px; font-size: 13.5px; color: #4b5563;
+              font-family: "Ubuntu Sans Mono", "DejaVu Sans Mono", monospace; }
+  .body { padding: 20px 22px 22px;
+          font-family: "Ubuntu Sans Mono", "DejaVu Sans Mono", monospace;
+          font-size: 18px; line-height: 1.68; }
+  .pr { color: #34d399; } .cm { color: #e5e7eb; } .out { color: #8b95a5; }
+  .ok { color: #34d399; } .warn { color: #fbbf24; }
+  .track { height: 8px; background: #0b0e13; border-radius: 999px; overflow: hidden;
+           margin-top: 15px; }
+  .fill { height: 100%; width: 38%; border-radius: 999px;
+          background: linear-gradient(90deg, #34d399, #10b981); }
+  .mlabel { display: flex; justify-content: space-between; font-size: 14.5px; color: #6b7280;
+            margin-top: 8px; }
+</style></head><body>
+  <header>
+    <div class="mark">vast<span>ai</span></div>
+    <div class="rule"></div>
+    <div class="kicker">a Claude Code skill</div>
+  </header>
+
+  <main>
+    <div class="left">
+      <h1>Rent a GPU.<br><em>Never forget<br>to turn it off.</em></h1>
+      <div class="sub">Vast.ai boxes from Claude Code. Every one gets a deadline
+        and a watchdog.</div>
+      <div class="repo">github.com/bednarjosef/claude-vastai-skill</div>
+    </div>
+
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>vast.py</span></div>
+      <div class="body">
+        <div><span class="pr">$</span> <span class="cm">vast.py up --gpu RTX_4090 --hours 3</span></div>
+        <div class="out">renting: 1x RTX 4090 &nbsp;$0.321/hr</div>
+        <div class="ok">READY ✓ &nbsp;<span class="out">torch 2.5.1, nothing to install</span></div>
+        <div class="warn">auto-destroy in 3h &nbsp;<span class="out">· watchdog armed</span></div>
+        <div class="track"><div class="fill"></div></div>
+        <div class="mlabel"><span>up 1h08m · spent $0.36</span><span>1h52m left</span></div>
+      </div>
+    </div>
+  </main>
+</body></html>
