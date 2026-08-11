@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""vast.py — a safe, general-purpose control plane for Vast.ai GPU instances.
+"""vast.py, a control plane for Vast.ai GPU instances that won't leave one billing.
 
-This is the engine behind the `vastai` Claude skill. It wraps the official
-`vastai` CLI with three things an agent (or a human) actually needs:
+The engine behind the `vastai` Claude skill. It wraps the official `vastai` CLI
+and adds the three things you actually need around a rented GPU:
 
-  1. **Spin up** — search verified offers, rent the cheapest that qualifies (or a
+  1. Spin up. Search verified offers, rent the cheapest that qualifies (or a
      specific offer id), with a working ssh endpoint and an auto-destroy deadline.
-  2. **Watch** — `status` / `watch` (live terminal) / `dashboard` (live HTML) show
-     every tracked box's status, uptime, cost-so-far and time left at a glance.
-  3. **Tear down safely** — every box is rented with a deadline; a background
-     `watchdog` destroys boxes the moment they pass it, so nothing is ever left
-     silently billing. `ps`/`nuke` catch orphans across the whole account.
+  2. Watch. `status`, `watch` (live terminal) and `dashboard` (live HTML) show
+     each tracked box's status, uptime, cost so far and time left.
+  3. Tear down. Every box is rented with a deadline and a background `watchdog`
+     destroys it when that passes. A destroy only counts once the account stops
+     listing the instance. `ps` and `nuke` deal with anything untracked.
 
-Unlike a one-box research harness, this tracks MANY instances at once. Every
-command targets a box by `--id <iid>` or `--label <name>`; when exactly one box
-is tracked, the target is implied. State lives in ~/.vast-claude/state.json
-(override with $VAST_CLAUDE_HOME) — independent of whatever directory you run from.
+It tracks many instances at once. Every command targets a box by `--id <iid>` or
+`--label <name>`, and with exactly one tracked box the target is implied. State
+lives in ~/.vast-claude/state.json (override with $VAST_CLAUDE_HOME), so it does
+not depend on the directory you run from.
 
-Auth: run `vastai set api-key <KEY>` once (the official CLI stores it). An ssh
-key (~/.ssh/id_ed25519) is generated + registered automatically if missing.
+Auth: run `vastai set api-key <KEY>` once, the official CLI stores it. An ssh key
+(~/.ssh/id_ed25519) is generated and registered on first use if missing.
 
 Quick tour:
   vast.py balance                       # check account credit first
@@ -46,6 +46,7 @@ import html
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -115,17 +116,29 @@ def vast(args: list[str], raw: bool = False, check: bool = True):
 # --- state (multi-instance) ----------------------------------------------------
 
 def load_state() -> dict:
-    if STATE.exists():
-        try:
-            return json.loads(STATE.read_text())
-        except json.JSONDecodeError:
-            pass
-    return {"instances": {}}
+    if not STATE.exists():
+        return {"instances": {}}
+    try:
+        return json.loads(STATE.read_text())
+    except json.JSONDecodeError:
+        # An unreadable state file must never look like "nothing is running": that
+        # would strand billing boxes while every command reports all-clear. Keep the
+        # damaged file for inspection and say so loudly instead.
+        bad = STATE.with_name("state.corrupt.json")
+        STATE.replace(bad)
+        print(f"WARNING: {STATE} was unreadable and has been moved to {bad}.\n"
+              f"         Tracking is now empty. Run `vast.py ps` to check for boxes "
+              f"that are still billing.", file=sys.stderr)
+        return {"instances": {}}
 
 
 def save_state(d: dict) -> None:
+    """Write state atomically, so an interrupted write can't truncate the file that
+    tells us what is still billing."""
     HOME.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(d, indent=2))
+    tmp = STATE.with_name("state.json.tmp")
+    tmp.write_text(json.dumps(d, indent=2))
+    os.replace(tmp, STATE)
 
 
 def tracked() -> dict:
@@ -366,6 +379,17 @@ def _account_instances() -> dict:
     return {str(r.get("id")): r for r in rows if r.get("id") is not None}
 
 
+def _credit(u: dict | None = None) -> float | None:
+    """Account credit in dollars, or None if it can't be read. Pass an already fetched
+    `show user` payload to avoid a second API call."""
+    if u is None:
+        u = vast(["show", "user"], raw=True, check=False)
+    if not isinstance(u, dict):
+        return None
+    c = u.get("credit", u.get("balance"))
+    return float(c) if isinstance(c, (int, float)) else None
+
+
 def _cost_so_far(rec: dict) -> float:
     return max(0.0, (time.time() - rec.get("created_at", time.time())) / 3600 * rec.get("dph", 0))
 
@@ -409,6 +433,16 @@ def cmd_up(a) -> None:
                      f"(try --unverified, a higher --max-price, fewer --gpus, or a different --gpu).")
         best = offers[0]
     print("renting: " + fmt_offer(best))
+
+    # Say up front how far the credit goes at this price, before anything is billed.
+    credit = _credit()
+    if credit is not None and best["dph_total"] > 0:
+        if credit <= 0:
+            sys.exit("account credit is $0.00. Top up at https://console.vast.ai/ first.")
+        runway = credit / best["dph_total"]
+        if a.hours and runway < a.hours:
+            print(f"NOTE: ${credit:.2f} credit is about {runway:.1f}h at this price, "
+                  f"short of the {a.hours}h deadline.")
 
     create = ["create", "instance", str(best["id"]), "--disk", str(a.disk)]
     if a.template:
@@ -510,7 +544,8 @@ def _status_line(rec: dict, live: dict | None) -> list[str]:
 def cmd_status(a) -> None:
     insts = tracked()
     if getattr(a, "id", None) or getattr(a, "label", None):
-        insts = {str(resolve_target(a)["instance_id"]): resolve_target(a)}
+        one = resolve_target(a)
+        insts = {str(one["instance_id"]): one}
     if not insts:
         print("no tracked instances. Start one with `vast.py up`, "
               "or `vast.py ps` to see the whole account.")
@@ -591,12 +626,16 @@ def cmd_sync(a) -> None:
     if not local.is_dir():
         sys.exit(f"--local must be a directory: {local}")
     dest = a.remote or REMOTE_DIR
-    excludes = " ".join(f"--exclude=./{x}" for x in
+    excludes = " ".join(shlex.quote(f"--exclude=./{x}") for x in
                         (".git", ".venv", "venv", "node_modules", "__pycache__",
                          ".vast-claude", *(a.exclude or [])))
     print(f"syncing {local} -> {dest} (tar over ssh)…")
-    remote = " ".join(ssh_base(s)) + f" 'mkdir -p {dest} && tar xzf - -C {dest}'"
-    subprocess.run(f"tar czf - {excludes} -C {local} . | {remote}", shell=True, check=True)
+    # Quote everything: local paths with spaces are normal, and this string hits a shell.
+    qdest = shlex.quote(dest)
+    remote = (" ".join(shlex.quote(x) for x in ssh_base(s))
+              + " " + shlex.quote(f"mkdir -p {qdest} && tar xzf - -C {qdest}"))
+    subprocess.run(f"tar czf - {excludes} -C {shlex.quote(str(local))} . | {remote}",
+                   shell=True, check=True)
     print("sync complete.")
 
 
@@ -628,16 +667,33 @@ def cmd_extend(a) -> None:
     print(f"instance {s['instance_id']} deadline set to {a.hours}h from now.")
 
 
-def _destroy(iid) -> None:
+def _destroy(iid) -> bool:
+    """Destroy an instance and confirm it is really gone.
+
+    Returns True only once the account stops listing it. Callers must not drop a box
+    from tracking on a False: a destroy that failed (API hiccup, expired key) plus a
+    forgotten box is exactly how something ends up billing unnoticed.
+    """
     subprocess.run([_vastai(), "destroy", "instance", str(iid)], input="y\n", text=True,
                    capture_output=True)
+    for attempt in range(3):
+        rows = vast(["show", "instances"], raw=True, check=False) or []
+        if not any(str(r.get("id")) == str(iid) for r in rows):
+            return True
+        if attempt < 2:
+            time.sleep(3)
+    return False
 
 
 def cmd_down(a) -> None:
     s = resolve_target(a)
-    _destroy(s["instance_id"])
-    forget_instance(s["instance_id"])
-    print(f"destroyed instance {s['instance_id']} and removed it from tracking.")
+    iid = s["instance_id"]
+    if not _destroy(iid):
+        sys.exit(f"instance {iid} is STILL listed on the account after the destroy call.\n"
+                 f"It is left tracked on purpose so the watchdog keeps trying. Retry with "
+                 f"`vast.py down --id {iid}`, or destroy it at https://console.vast.ai/.")
+    forget_instance(iid)
+    print(f"destroyed instance {iid} and removed it from tracking.")
 
 
 def cmd_watchdog(a) -> None:
@@ -658,10 +714,13 @@ def cmd_watchdog(a) -> None:
                 continue
             if now >= dl:
                 print(f"watchdog: instance {iid} hit its deadline -> destroying.")
-                _destroy(iid)
-                forget_instance(iid)
-            else:
-                guarding = True
+                if _destroy(iid):
+                    forget_instance(iid)
+                else:
+                    # Keep it tracked and keep looping: a box that refused to die is
+                    # the one case where the watchdog must not go away.
+                    print(f"watchdog: instance {iid} did NOT go away; retrying in 60s.")
+                    guarding = True
         if not guarding:
             print("watchdog: no remaining deadlines to guard; exiting.")
             return
@@ -701,10 +760,17 @@ def cmd_nuke(a) -> None:
         if input("type 'nuke' to confirm: ").strip() != "nuke":
             print("aborted.")
             return
+    failed = []
     for r in rows:
         print(f"destroying {r.get('id')} ({r.get('gpu_name')})")
-        _destroy(r.get("id"))
-    save_state({"instances": {}})
+        if _destroy(r.get("id")):
+            forget_instance(r.get("id"))
+        else:
+            failed.append(str(r.get("id")))
+    if failed:
+        sys.exit(f"WARNING: still listed after destroy: {', '.join(failed)}. They stay "
+                 f"tracked; retry `vast.py nuke` or destroy them at https://console.vast.ai/.")
+    save_state({"instances": {}})   # the account is confirmed empty, so drop any stale records too
     print("all instances destroyed; tracking cleared.")
 
 
@@ -713,7 +779,7 @@ def cmd_balance(a) -> None:
     if not isinstance(u, dict):
         print("could not read account info (is the api key set? `vastai set api-key <KEY>`).")
         return
-    credit = u.get("credit", u.get("balance"))
+    credit = _credit(u)
     rate = sum(r.get("dph_total", 0) for r in (vast(["show", "instances"], raw=True, check=False) or []))
     if credit is not None:
         print(f"account credit: ${credit:.2f}")
