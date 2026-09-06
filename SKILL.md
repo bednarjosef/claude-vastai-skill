@@ -94,6 +94,36 @@ credit, burn rate and rough runway. `vast.py ps` reveals anything untracked.
 `vast.py nuke` destroys every instance on the account. It asks for confirmation; only pass
 `--yes` when the user clearly means all of them, right now.
 
+## Bandwidth, not GPU time, is usually the bill
+
+**Pick offers by `inet_down_cost` ($/GB inbound), not by `$/hr`,** for any job that
+downloads models or databases. Measured 2026-09-03: a box that lived 13 minutes billed
+$3.18, of which **$3.10 was inbound bandwidth** (79.3 GB at $0.039/GB) against $0.03 of GPU
+time. A database download, not compute, emptied the account.
+
+The rate is a per-host setting and varies about 20x — across RTX 3090/4090 offers with large
+disks it runs from **$0.0000 to $0.039 per GB** — and neither the vast.ai listing nor this
+skill's `search` output shows it, so the dominant cost term is invisible unless asked for.
+Sorting by `$/hr` reliably picks a bad one.
+
+```bash
+# add the filter to the raw query on search / up
+vast.py up --gpu RTX_4090 --query "disk_space>=1000 inet_down_cost<=0.001" --disk 400
+# and read the real numbers before renting
+vastai search offers 'num_gpus=1 gpu_name=RTX_4090' --raw \
+  | python3 -c "import json,sys; [print(o['id'], o['dph_total'], o.get('inet_down_cost'), o.get('storage_cost'), o.get('inet_down')) for o in json.load(sys.stdin)[:20]]"
+```
+
+Fields worth reading: `inet_down_cost` / `inet_up_cost` ($/GB), `storage_cost` ($/GB/month,
+charged per hour the box exists — 400 GB at $0.185/hr adds up), `inet_down` (Mbit/s).
+Mirroring data to HuggingFace makes downloads *faster* but not cheaper; the box still pays
+per inbound GB. For databases reused across rentals, persistent volumes
+(`--create-volume` / `--link-volume`) pay for the download once.
+
+**CPU-only offers cannot be rented** through this CLI: `vastai create instance` answers
+`no_such_ask` for every `num_gpus=0` offer, so "rent a cheap CPU box for a CPU job" is not
+available — use the cheapest GPU box and ignore the GPU.
+
 ## Conventions and cautions
 
 - Renting and destroying spend money and lose data. Destroying is irreversible and wipes the

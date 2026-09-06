@@ -365,7 +365,9 @@ def fmt_offer(o: dict) -> str:
     n = o.get("num_gpus", 1)
     cpu = o.get("cpu_cores_effective") or o.get("cpu_cores", 0)
     ram = o.get("cpu_ram", 0) / 1024
-    return (f"id={o['id']:<9} ${o['dph_total']:.3f}/hr (${o['dph_total']/n:.3f}/gpu)  "
+    # CPU-only offers have num_gpus == 0; per-GPU price is undefined, not a crash.
+    per = f" (${o['dph_total']/n:.3f}/gpu)" if n else ""
+    return (f"id={o['id']:<9} ${o['dph_total']:.3f}/hr{per}  "
             f"{n}x {o['gpu_name']}  {o.get('gpu_total_ram',0)/1024:.0f}GB·vram  "
             f"cpu={cpu:.0f} ram={ram:.0f}GB  rel={o.get('reliability2',0):.3f}  "
             f"net={o.get('inet_down',0):.0f}↓  {o.get('geolocation','?')}")
@@ -712,7 +714,12 @@ def cmd_watchdog(a) -> None:
             dl = rec.get("deadline")
             if dl is None:
                 continue
-            if now >= dl:
+            if now < dl:
+                # A deadline still in the future is exactly what there is to guard; without
+                # this the loop fell through to "nothing left to guard" and exited on its
+                # first pass, so no box was ever actually watched.
+                guarding = True
+            elif now >= dl:
                 print(f"watchdog: instance {iid} hit its deadline -> destroying.")
                 if _destroy(iid):
                     forget_instance(iid)

@@ -7,3 +7,4 @@ __pycache__/
 .vast-claude/
 state.json
 *.local.json
+*.bak
